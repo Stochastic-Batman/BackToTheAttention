@@ -21,6 +21,13 @@ def get_data(ticker: str, period: str = "3y") -> pd.DataFrame:
     return df
 
 
+# MinMax scaling is necessary because neural network based architectures, including Transformers,
+# train more stably and converge faster when input features are normalized to a consistent range like [0,1]
+# rather than using raw stock prices that can vary widely in magnitude.
+# large or varying input values can lead to exploding or vanishing gradients during backpropagation,
+# particularly in attention mechanisms where dot products between queries and keys become unbalanced and dominate the softmax unfairly.
+# scaling also ensures that the model's learned patterns are driven by relative changes in price rather than absolute levels, which is especially helpful for financial time series.
+
 # fit MinMaxScaler (0 to 1) ONLY on training portion to prevent data leakage.
 # x_scaled = (x - train_min) / (train_max - train_min)
 def minmax_scale(series: np.ndarray, train_ratio: float = 0.8) -> tuple[np.ndarray, np.ndarray, MinMaxScaler]:

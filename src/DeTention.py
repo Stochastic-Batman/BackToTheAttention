@@ -16,23 +16,21 @@ class RoPE(nn.Module):
         # to save as part of a model's persistent state without treating it as a learnable parameter
         self.register_buffer(name="inv_freq", tensor=inv_freq, persistent=True)  # shape: (dim / 2,)
 
-
     def forward(self, x: torch.Tensor, seq_len: int) -> torch.Tensor:
-        positions = torch.arange(start=0, end=seq_len, device=x.device, dtype=self.inv_freq.dtype)  # position indices 0 to seq_len - 1
-        # [:, None]: (seq_len,) -> (seq_len, 1) and [None, :]: (dim / 2,) -> (1, dim / 2)
-        angles = positions[:, None] * self.inv_freq[None, :]  # compute angles: positions * inv_freq -> (seq_len, dim / 2)
-        sin_angles, cos_angles = torch.sin(angles), torch.cos(angles)
+        positions = torch.arange(0, seq_len, device=x.device, dtype=self.inv_freq.dtype)  # (seq_len,)
+        angles = positions[:, None] * self.inv_freq[None, :]  # (seq_len, dim//2)
+        sin, cos = torch.sin(angles), torch.cos(angles)  # (seq_len, dim / 2)
+        # expand dims for broadcasting: (seq_len, dim//2) -> (1, seq_len, dim//2)
+        sin = sin.unsqueeze(0)
+        cos = cos.unsqueeze(0)
 
-        sin = sin_angles.repeat_interleave(repeats=2, dim=-1)  # (seq_len, dim / 2) -> (seq_len, dim)
-        cos = cos_angles.repeat_interleave(repeats=2, dim=-1)  # [a, b] -> [a, a, b, b]
-
-        x1, x2 = x[..., :self.dim // 2], x[..., self.dim // 2:]  # take the first/last half of the last dimension, for all batch/head/seq elements.
-
-        # counterclockwise rotation
+        # split the last dimension
+        x1 = x[..., : self.dim // 2]  # (B, seq_len, dim / 2)
+        x2 = x[..., self.dim // 2:]  # (B, seq_len, dim / 2)
+        # Rotation matrix
         rotated_x1 = x1 * cos - x2 * sin
         rotated_x2 = x1 * sin + x2 * cos
 
-        # The dot product between rotated Q and K depends only on the relative distance between positions - perfect for time series!
         return torch.cat([rotated_x1, rotated_x2], dim=-1)
 
 
@@ -53,7 +51,7 @@ class DeTentionBlock(nn.Module):
             nn.Linear(d_model, ff_hidden_size),
             nn.GLU(dim=-1),  # https://arxiv.org/pdf/2002.05202; please, check the last line of section 4 (Conclusions)
             nn.Dropout(dropout),
-            nn.Linear(ff_hidden_size, d_model)
+            nn.Linear(ff_hidden_size // 2, d_model)
         )
         self.dropout_layer = nn.Dropout(dropout)
 
@@ -111,10 +109,24 @@ class DeTention(nn.Module):
 
 def save_model(model: DeTention, path: str = "models/DeTention.pth") -> None:  # save the entire model (architecture + weights)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    torch.save(model, path)
+    torch.save({
+        'state_dict': model.state_dict(),
+        'config': {
+            'seq_len': model.seq_len,
+            'd_model': model.d_model,
+            'use_avg_pool': model.use_avg_pool
+        }
+    }, path)
 
 
-def load_model(path: str = "models/DeTention.pth") -> DeTention:
+def load_model(path: str = "models/DeTention.pth", **model_kwargs) -> DeTention:
     if not os.path.exists(path):
         raise FileNotFoundError(f"Model file not found: {path}")
-    return torch.load(path, map_location=torch.device('cpu'))
+    checkpoint = torch.load(path, map_location=torch.device('cpu'), weights_only=True)
+
+    config = checkpoint.get('config', {})
+    config.update(model_kwargs)
+    model = DeTention(**config)
+    model.load_state_dict(checkpoint['state_dict'])
+
+    return model

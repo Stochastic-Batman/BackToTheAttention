@@ -1,4 +1,5 @@
 import argparse
+import joblib
 import logging
 import numpy as np
 import os
@@ -7,8 +8,9 @@ import torch
 import torch.nn as nn
 import yfinance as yf
 
-from sklearn.preprocessing import MinMaxScaler
 from DeTention import *
+from sklearn.preprocessing import MinMaxScaler
+from torch.utils.data import DataLoader, TensorDataset
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%d/%m/%Y %H:%M:%S')
@@ -74,7 +76,8 @@ def create_windows(scaled_data: np.ndarray, L: int = 30) -> tuple[np.ndarray, np
     return X, y
 
 
-def prepare_datasets(df: pd.DataFrame, L: int = 30, train_ratio: float = 0.8) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, MinMaxScaler]:
+def prepare_datasets(df: pd.DataFrame, L: int = 30, train_ratio: float = 0.8) -> tuple[
+    np.ndarray, np.ndarray, np.ndarray, np.ndarray, MinMaxScaler]:
     series = df['Close'].values.reshape(-1, 1)
     train_scaled, test_scaled, scaler = minmax_scale(series, train_ratio=train_ratio)
 
@@ -108,7 +111,8 @@ if __name__ == "__main__":
 
     # enforce divisibility constraints
     if args.d_model % args.n_heads != 0:
-        logger.info("d_model (%d) not divisible by n_heads (%d) -> resetting d_model to 64 and n_head to 4", args.d_model, args.n_heads)
+        logger.info("d_model (%d) not divisible by n_heads (%d) -> resetting d_model to 64 and n_head to 4",
+                    args.d_model, args.n_heads)
         args.d_model = 64
         args.n_heads = 4
 
@@ -125,10 +129,10 @@ if __name__ == "__main__":
     X_test_t = torch.tensor(X_test, dtype=torch.float32)
     y_test_t = torch.tensor(y_test, dtype=torch.float32).unsqueeze(dim=-1)
 
-    logger.info("Tensors -> X_train: %s, y_train: %s | X_test: %s, y_test: %s",X_train_t.shape, y_train_t.shape, X_test_t.shape, y_test_t.shape)
+    logger.info("Tensors -> X_train: %s, y_train: %s | X_test: %s, y_test: %s", X_train_t.shape, y_train_t.shape, X_test_t.shape, y_test_t.shape)
 
-    train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(X_train_t, y_train_t), batch_size=args.batch_size, shuffle=True)
-    test_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(X_test_t, y_test_t), batch_size=args.batch_size, shuffle=False)
+    train_loader = DataLoader(TensorDataset(X_train_t, y_train_t), batch_size=args.batch_size, shuffle=True)
+    test_loader = DataLoader(TensorDataset(X_test_t, y_test_t), batch_size=args.batch_size, shuffle=False)
 
     logger.info("DataLoaders -> train batches: %d, test batches: %d", len(train_loader), len(test_loader))
 
@@ -140,12 +144,14 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    logger.info("Initialized DeTention -> layers: %d, d_model: %d, heads: %d", args.n_layers, args.d_model, args.n_heads)
+    logger.info("Initialized DeTention -> layers: %d, d_model: %d, heads: %d", args.n_layers, args.d_model,
+                args.n_heads)
 
     best_test_loss = float('inf')
     patience_counter = 0
     best_path = "models/DeTention_best.pth"
     final_path = "models/DeTention.pth"
+    scaler_path = "models/scaler.pkl"
 
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -168,7 +174,7 @@ if __name__ == "__main__":
         # evaluation
         model.eval()
         test_loss = 0.0
-        
+
         with torch.no_grad():
             for batch_x, batch_y in test_loader:
                 batch_x, batch_y = batch_x.to(device), batch_y.to(device)
@@ -177,7 +183,7 @@ if __name__ == "__main__":
                 loss = criterion(pred, batch_y.squeeze(dim=-1))
 
                 test_loss += loss.item() * batch_x.size(0)
-                
+
         test_loss /= len(test_loader.dataset)
 
         logger.info("Epoch %03d | Train Loss: %.4f | Test Loss: %.4f", epoch, train_loss, test_loss)
@@ -197,4 +203,8 @@ if __name__ == "__main__":
     best_model = load_model(path=best_path)
     save_model(best_model, path=final_path)
     os.remove(best_path)
+
+    # Save the scaler for inference
+    joblib.dump(scaler, scaler_path)
     logger.info("Training completed. Final model saved as '%s' (temporary best model removed)", final_path)
+    logger.info("Scaler saved as '%s'", scaler_path)

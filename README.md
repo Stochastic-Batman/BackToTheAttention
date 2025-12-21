@@ -39,7 +39,7 @@ and install requirements with:
 python src/train.py
 
 # Example with custom values
-python src/train.py --ticker "PINS" --epochs 10 --batch_size 64 --L 60 --lr 0.001
+python src/train.py --ticker "PINS" --epochs 10 --batch_size 32 --L 60 --lr 0.001
 ```
 
 2. After training, predict the next-day price:
@@ -48,7 +48,7 @@ python src/train.py --ticker "PINS" --epochs 10 --batch_size 64 --L 60 --lr 0.00
 # Uses the latest L days to predict tomorrow's closing price
 python src/predict.py
 
-# Example with custom model or different ticker/lookback
+# Example with custom values
 python src/predict.py --model_path models/DeTention.pth --ticker "PINS" --L 30
 ```
 

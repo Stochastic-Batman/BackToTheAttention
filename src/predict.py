@@ -6,7 +6,6 @@ import os
 import torch
 import yfinance as yf
 
-from datetime import datetime, timedelta
 from DeTention import DeTention, load_model
 from sklearn.preprocessing import MinMaxScaler
 

@@ -72,7 +72,7 @@ class DeTentionBlock(nn.Module):
         return x
 
 
-# DeTention is the complete end-to-end model that handles input projection from raw prices, stacks multiple DeTentionBlocks and produces the final prediction.
+# DeTention is the complete end-to-end model that handles input projection from raw prices, stacks multiple DeTention blocks and produces the final prediction.
 class DeTention(nn.Module):
     def __init__(self, seq_len: int = 30, d_model: int = 64, n_heads: int = 4, n_layers: int = 2, ff_hidden_size: int = 256, dropout: float = 0.2, use_avg_pool: bool = True):
         super().__init__()
@@ -122,8 +122,8 @@ def save_model(model: DeTention, path: str = "models/DeTention.pth") -> None:  #
 def load_model(path: str = "models/DeTention.pth", **model_kwargs) -> DeTention:
     if not os.path.exists(path):
         raise FileNotFoundError(f"Model file not found: {path}")
-    checkpoint = torch.load(path, map_location=torch.device('cpu'), weights_only=True)
 
+    checkpoint = torch.load(path, map_location=torch.device('cpu'), weights_only=True)
     config = checkpoint.get('config', {})
     config.update(model_kwargs)
     model = DeTention(**config)

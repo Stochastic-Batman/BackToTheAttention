@@ -57,8 +57,7 @@ def minmax_scale(series: np.ndarray, train_ratio: float = 0.8) -> tuple[np.ndarr
 
 
 def create_windows(scaled_data: np.ndarray, L: int = 30) -> tuple[np.ndarray, np.ndarray]:
-    # sliding window for a sequence x_0, x_1, \cdots, x_{T - 1},
-    # creates X_i = [x_{i}, x_{i + 1}, \cdots, x_{i + L - 1}] \in \mathbb{R}^{L \times 1}; y_i = x_{i + L}
+    # For X_i = [x_{i}, x_{i + 1}, \cdots, x_{i + L - 1}] \in \mathbb{R}^{L \times 1}; y_i = x_{i + L}
     # returns X \in \mathbb{R}^{N \times L \times 1}, y \in \mathbb{R}^{N \times 1} where N = len(scaled_data) - lookback
     if len(scaled_data) <= L:
         raise ValueError("Data length %d must be > lookback %d", len(scaled_data), L)
@@ -111,8 +110,7 @@ if __name__ == "__main__":
 
     # enforce divisibility constraints
     if args.d_model % args.n_heads != 0:
-        logger.info("d_model (%d) not divisible by n_heads (%d) -> resetting d_model to 64 and n_head to 4",
-                    args.d_model, args.n_heads)
+        logger.info("d_model (%d) not divisible by n_heads (%d) -> resetting d_model to 64 and n_head to 4", args.d_model, args.n_heads)
         args.d_model = 64
         args.n_heads = 4
 
@@ -144,8 +142,7 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    logger.info("Initialized DeTention -> layers: %d, d_model: %d, heads: %d", args.n_layers, args.d_model,
-                args.n_heads)
+    logger.info("Initialized DeTention -> layers: %d, d_model: %d, heads: %d", args.n_layers, args.d_model, args.n_heads)
 
     best_test_loss = float('inf')
     patience_counter = 0

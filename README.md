@@ -11,7 +11,7 @@ Martltsera/
 ├── notebooks/
 │   ├── data_and_training.ipynb  # these notebooks are functionally equivalent
 │   └── inference.ipynb  # to the Python scripts
-├── models/  # Stores trained model weights
+├── models/  # Stores trained model weights and comparison plots
 ├── src/
 │   ├── DeTention.py  # Defines the Attention + Time Series Architecture
 │   ├── train.py  # Contains the training loop and saving logic

@@ -1,6 +1,7 @@
 import argparse
 import joblib
 import logging
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 import torch
@@ -87,6 +88,47 @@ def predict_next_day(model: DeTention, scaler: MinMaxScaler, ticker: str = "PINS
     return pred
 
 
+# I used Gemini 3 Pro for writing this method, I suck at visualization
+def visualize_recent_predictions(model: DeTention, scaler: MinMaxScaler, series: np.ndarray, dates: list, ticker: str = "PINS", L: int = 30, lookback_days: int = 30):
+    logger.info("VISUALIZING RECENT PREDICTIONS OVER PAST %d DAYS", lookback_days)
+
+    if len(series) < L + lookback_days:
+        logger.warning("Not enough data for %d-day visualization with L=%d; skipping", lookback_days, L)
+        return
+
+    recent_series = series[-(L + lookback_days):]
+    recent_dates = dates[-(lookback_days):]
+
+    actual_prices = recent_series[-lookback_days:, 0]
+    predicted_prices = []
+
+    for i in range(lookback_days):
+        window = recent_series[i:i + L]
+        scaled_window = scaler.transform(window)
+        input_tensor = torch.tensor(scaled_window, dtype=torch.float32).unsqueeze(0)  # (1, L, 1)
+        with torch.no_grad():
+            scaled_pred = model(input_tensor).item()
+        pred = scaler.inverse_transform([[scaled_pred]])[0][0]
+        predicted_prices.append(pred)
+
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(recent_dates, actual_prices, color='green', label='Actual Price', marker='o', linewidth=2)
+    ax.plot(recent_dates, predicted_prices, color='purple', label='Predicted Price', marker='x', linewidth=2, linestyle='--')
+    ax.set_title(f'{ticker} Stock Price: Actual vs Predicted (Last {lookback_days} Days)')
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Closing Price ($)')
+    ax.legend()
+    ax.grid(True, linestyle='--', alpha=0.5)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plot_path = f"models/{ticker}_prediction_plot.png"
+    plt.savefig(plot_path)
+    plt.show()
+    plt.close()
+    logger.info("Prediction plot saved to %s", plot_path)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Predict stock prices using trained DeTention model")
     parser.add_argument("--model_path", type=str, default="models/DeTention.pth", help="Path to the trained model")
@@ -123,3 +165,7 @@ if __name__ == "__main__":
         next_price = predict_next_day(model, scaler, ticker=args.ticker, L=args.L, period=args.period)
         logger.info("NEXT-DAY PREDICTION FOR %s", args.ticker)
         logger.info("Predicted Closing Price: $%.3f", next_price)
+
+        # fetch data once and reuse for visualization (from predict_next_day or test)
+        series, dates = get_recent_data(args.ticker, period=args.period)
+        visualize_recent_predictions(model, scaler, series, dates, ticker=args.ticker, L=args.L)

@@ -1,15 +1,15 @@
 import argparse
 import joblib
 import logging
+import matplotlib.pyplot as plt
 import numpy as np
-import os
 import pandas as pd
-import torch
-import torch.nn as nn
 import yfinance as yf
 
 from DeTention import *
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.preprocessing import MinMaxScaler
+from statsmodels.tsa.arima.model import ARIMA
 from torch.utils.data import DataLoader, TensorDataset
 
 
@@ -205,3 +205,72 @@ if __name__ == "__main__":
     joblib.dump(scaler, scaler_path)
     logger.info("Training completed. Final model saved as '%s' (temporary best model removed)", final_path)
     logger.info("Scaler saved as '%s'", scaler_path)
+
+    logger.info("Fitting ARIMA baseline for comparison")
+
+    # recompute series, train_series, test_series (since local in minmax_scale)
+    series = df['Close'].values.reshape(-1, 1)
+    split_idx = int(len(series) * args.train_ratio)
+    train_series = series[:split_idx].flatten()
+    test_series = series[split_idx:].flatten()
+
+    # fit ARIMA on original train_series (unscaled)
+    arima_order = (5, 1, 0)  # p,d,q
+    arima_model = ARIMA(train_series, order=arima_order)
+    arima_fit = arima_model.fit()
+
+    # ARIMA is autoregressive, so update with actuals
+    arima_predictions = []
+    history = list(train_series)
+    for t in range(len(test_series)):
+        arima_temp = ARIMA(history, order=arima_order)
+        arima_fit_temp = arima_temp.fit()
+        forecast = arima_fit_temp.forecast()[0]
+        arima_predictions.append(forecast)
+        history.append(test_series[t])
+
+    # DeTention predictions on test set (unscaled)
+    model.eval()
+    detention_predictions = []
+    with torch.no_grad():
+        for i in range(0, len(X_test_t), args.batch_size):
+            batch_x = X_test_t[i:i + args.batch_size].to(device)
+            batch_pred = model(batch_x).cpu().numpy()
+            detention_predictions.extend(batch_pred)
+
+    detention_predictions = scaler.inverse_transform(np.array(detention_predictions).reshape(-1, 1)).flatten()
+    actual_test = test_series[args.L:]  # metrics (on original scale), align with windowed test set (skips first L in test)
+
+    arima_predictions_aligned = arima_predictions[args.L:]  # Align ARIMA to match
+    arima_mse = mean_squared_error(actual_test, arima_predictions_aligned)
+    arima_mae = mean_absolute_error(actual_test, arima_predictions_aligned)
+
+    detention_mse = mean_squared_error(actual_test, detention_predictions)
+    detention_mae = mean_absolute_error(actual_test, detention_predictions)
+
+    logger.info("ARIMA Test MSE: %.4f | MAE: %.4f", arima_mse, arima_mae)
+    logger.info("DeTention Test MSE: %.4f | MAE: %.4f", detention_mse, detention_mae)
+    logger.info("DeTention vs ARIMA: MSE Improvement: %.2f%% | MAE Improvement: %.2f%%",100 * (arima_mse - detention_mse) / arima_mse, 100 * (arima_mae - detention_mae) / arima_mae)
+
+    logger.info("Generating comparison plot for test set predictions")
+
+    dates = df.index  # get dates for test set (from original df)
+    test_start_idx = split_idx + args.L  # adjust for windowing offset
+    test_dates = dates[test_start_idx:test_start_idx + len(actual_test)]
+
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(test_dates, actual_test, color='green', label='Actual Price', marker='o', linewidth=2)
+    ax.plot(test_dates, detention_predictions, color='purple', label='DeTention Predicted', marker='x', linewidth=2, linestyle='--')
+    ax.plot(test_dates, arima_predictions_aligned, color='orange', label='ARIMA Predicted', marker='^', linewidth=2, linestyle=':')
+    ax.set_title(f'{args.ticker} Test Set: Actual vs Predictions')
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Closing Price ($)')
+    ax.legend()
+    ax.grid(True, linestyle='--', alpha=0.5)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plot_path = f"models/{args.ticker}_test_comparison_plot.png"
+    plt.savefig(plot_path)
+    plt.close()
+    logger.info("Test set comparison plot saved to %s", plot_path)

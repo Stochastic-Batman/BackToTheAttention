@@ -1,0 +1,207 @@
+\documentclass{beamer}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+
+\title{BackToTheAttention}
+\author{Stochastic Batman}
+\date{December 2025}
+
+
+\definecolor{coolpurple}{HTML}{7f65a0}
+\definecolor{bgcolor}{HTML}{414042}
+
+\setbeamercolor{normal text}{fg=white,bg=bgcolor}
+\setbeamercolor{structure}{fg=coolpurple}
+\setbeamercolor{frametitle}{fg=white,bg=coolpurple}
+\setbeamercolor{title}{fg=white,bg=coolpurple}
+\setbeamercolor{date}{fg=white}
+\setbeamercolor{author}{fg=white}
+
+\setbeamercolor{item}{fg=coolpurple}
+
+
+\begin{document}
+	
+	\begin{frame}
+		\titlepage
+	\end{frame}
+	
+	\begin{frame}
+		\frametitle{Problem Statement}
+		
+		\begin{itemize}
+			\item Goal: Apply attention mechanisms to time series forecasting, specifically stock price prediction.
+			\item Target: Predict closing prices for Pinterest (PINS) using historical data.
+			\item Why? Attention excels at capturing dependencies in sequences; time series like stocks have temporal patterns that can benefit from this.
+			\item Approach: Code-first implementation in Python (src/), demonstrated via notebooks.
+			\item Data Source: Yahoo Finance API (yfinance) for real-time stock data.
+			\item Note: Results are non-reproducible due to live data fetching; focus on trends and relative performance.
+		\end{itemize}
+		
+	\end{frame}
+	
+	\begin{frame}[fragile]
+		\frametitle{Project Structure and Setup}
+		
+		\begin{itemize}
+			\item \textbf{Structure}:
+			\begin{itemize}
+				\item src/: Core logic (DeTention.py, train.py, predict.py).
+				\item notebooks/: Walkthroughs (data\_and\_training.ipynb, inference.ipynb).
+				\item models/: Trained weights and plots.
+			\end{itemize}
+			\item \textbf{Setup}:
+			\begin{itemize}
+				\item Python 3.14 virtual environment.
+				\item Used packages: matplotlib, scikit-learn, statsmodels (for ARIMA), torch, yfinance.
+				\item Requires internet for data fetching.
+			\end{itemize}
+			\item \textbf{Usage Example}:
+			\begin{verbatim}
+				python src/train.py --ticker "PINS"
+				python src/predict.py
+			\end{verbatim}
+		\end{itemize}
+		
+	\end{frame}
+	
+	\begin{frame}
+		\frametitle{Data Preparation Steps}
+		
+		\begin{itemize}
+			\item Fetch historical data with Yahoo Finance API.
+			\item Preprocess:
+			\begin{itemize}
+				\item Focus on 'Close' prices (target).
+				\item Normalize using MinMaxScaler to $[0,1]$ (scaling prevents gradient issues).
+				\item Create sequences: Window size $L$ (e.g., 30 days) to predict next day.
+				\item Split: Train (80\%), Test (20\%).
+			\end{itemize}
+			\item Dataset: TensorDataset for PyTorch DataLoader (batch size 32).
+		\end{itemize}
+		
+	\end{frame}
+	
+	\begin{frame}
+		\frametitle{Model Architecture: DeTention Overview}
+		
+		\begin{itemize}
+			\item Transformer-inspired architecture for time series forecasting.
+			\item Intuition: Unlike RNNs/LSTMs with sequential processing, attention allows parallel computation and direct focus on relevant past time steps, capturing long-range dependencies in stock prices (e.g., market cycles).
+			\item Components:
+			\begin{itemize}
+				\item Input: Sequence of $L$ time steps, each a scalar (closing price) or vector.
+				\item Embedding: Linear layer to project to $d_{model}$ (e.g., 64).
+				\item Positional Encoding: RoPE (Rotary Position Embeddings) for relative positioning.
+				\item Encoder: Stack of $n_{layers}$ (e.g., 2) DeTentionBlocks.
+				\item Output: Pooling (avg or last) + Linear to predict next value.
+			\end{itemize}
+			\item Advantages: Scalable, handles variable-length sequences, focuses on important historical patterns.
+		\end{itemize}
+		
+	\end{frame}
+	
+	\begin{frame}
+		\frametitle{DeTention: RoPE Positional Encoding}
+		
+		\begin{itemize}
+			\item Intuition: Time series are ordered; RoPE encodes positions via rotations in embedding space, preserving relative distances (better than absolute sinusoids for sequences).
+			\item Math:
+			\begin{itemize}
+				\item For dimension pairs $(2i, 2i+1)$: $\theta_i = base^{-2i/d}$ (base=10000).
+				\item For position $m$, vector $x = [x_0, x_1, ..., x_{d-1}]$, rotate: $$x'_{2i} = x_{2i} \cos(m\theta_i) - x_{2i+1} \sin(m\theta_i)$$
+				$$x'_{2i+1} = x_{2i} \sin(m\theta_i) + x_{2i+1} \cos(m\theta_i)$$
+			\end{itemize}
+			\item Applied to queries and keys in attention for relative positional awareness.
+			\item Why? Enables model to generalize to longer sequences than trained on; intuitive for time shifts in stocks.
+		\end{itemize}
+		
+	\end{frame}
+	
+	\begin{frame}
+		\frametitle{DeTentionBlock: Attention and Feed-Forward}
+		
+		\begin{itemize}
+			\item Intuition: Core building block; self-attention lets each time step "attend" to others, weighing importance (e.g., recent volatility influences prediction more). FFN adds non-linearity for complex patterns.
+			\item Structure:
+			\begin{itemize}
+				\item LayerNorm before attention and FFN for stable training.
+				\item Multi-Head Self-Attention: $n_{heads}=4$, each head computes attention in subspace.
+				\item Recall attention:
+				\[ \text{Attention}(Q, K, V) = \mathrm{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right) V \]
+				where $Q, K, V$ are linear projections of input + RoPE.
+				\item Feed-Forward: Two linear layers with ReLU, hidden size 256.
+				\item Dropout (0.2) for regularization.
+				\item Residual connections: output = input + sublayer(output).
+			\end{itemize}
+			\item Overall: Allows model to learn which past prices matter most for forecasting next close.
+		\end{itemize}
+		
+	\end{frame}
+	
+	\begin{frame}
+		\frametitle{Training Process}
+		
+		\begin{itemize}
+			\item Hyperparameters: LR=0.0001, Epochs=100, Patience=15 (early stopping).
+			\item Optimizer: Adam; Loss: MSE.
+			\item Process:
+			\begin{itemize}
+				\item Train loop with validation.
+				\item Monitor val loss; save best model.
+				\item Device: GPU if available.
+			\end{itemize}
+			\item Baseline: ARIMA (\texttt{p=5, d=1, q=0}) for comparison.
+			\item Plots: Training curves, test predictions vs actuals.
+		\end{itemize}
+		
+	\end{frame}
+	
+	\begin{frame}
+		\frametitle{Training Results Interpretation}
+		
+		\begin{itemize}
+			\item Model converges with decreasing loss (train and val).
+			\item Test Performance: Tracks trends well, captures general movements.
+			\item Metrics: Low MSE/MAE indicate reasonable accuracy for volatile stocks.
+			\item Visualization: Prediction plot shows alignment with actual prices, though some deviations in peaks/troughs.
+			\item Insights: Attention helps model long-range dependencies, but stock noise limits perfect prediction.
+			\item Note: Numbers vary with data; focus on relative improvements and trends.
+		\end{itemize}
+		
+	\end{frame}
+	
+	\begin{frame}
+		\frametitle{DeTention vs ARIMA}
+		
+		\begin{itemize}
+			\item Comparison on Test Set:
+			\begin{itemize}
+				\item ARIMA: Statistical baseline, good for linear autoregressive patterns.
+				\item DeTention: Handles non-linear dependencies via attention.
+			\end{itemize}
+			\item Results: ARIMA often shows slightly lower errors (e.g., 20-25\% better in some runs), but DeTention competitive.
+			\item Why ARIMA Wins Sometimes? Stocks can be near-random; simple models suffice.
+		\end{itemize}
+		\centering
+		\includegraphics[width=0.8\textwidth]{notebooks/models/PINS_test_comparison_plot.png}
+		
+	\end{frame}
+	
+	\begin{frame}
+		
+		\frametitle{References}
+		
+		\begin{enumerate}
+			\item \href{https://arxiv.org/abs/1706.03762}{Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, Ł., \& Polosukhin, I. (2017). Attention is All You Need.}
+			\item \href{https://arxiv.org/abs/2104.09864}{Su, J., Lu, Y., Pan, S., Murtadha, A., Wen, B., \& Liu, Y. (2023). RoFormer: Enhanced Transformer with Rotary Position Embedding.}
+			\item \href{https://arxiv.org/abs/2002.05202}{Shazeer, N. (2020). GLU Variants Improve Transformer.}
+		\end{enumerate}
+		
+	\end{frame}
+	
+	
+	
+\end{document}
